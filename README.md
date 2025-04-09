@@ -39,13 +39,4 @@ The implementation is based on a dataset of 550 ultrasound images from 55 patien
 - Medium fat (30-70%)
 - High fat (>70%)
 
-## Usage
-```python
-from fatty_liver_classifier import FattyLiverClassifier
 
-# Initialize the classifier
-classifier = FattyLiverClassifier()
-
-# Train and evaluate
-classifier.train(X_train, y_train)
-metrics = classifier.evaluate(X_test, y_test)
