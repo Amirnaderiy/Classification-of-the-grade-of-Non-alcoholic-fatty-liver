@@ -357,19 +357,16 @@ class FeatureSelector:
             remaining.remove(next_feat)
             
         return selected
-
+    
     def anova_selection(self, X, y, k):
         """
         Implement ANOVA feature selection using F-statistics.
         Based on equation (2) from the paper.
         """
-        # Calculate F-scores
         f_scores, _ = f_classif(X, y)
         
-        # Handle any NaN values
-        f_scores = np.nan_to_fill(f_scores, 0)
+        f_scores = np.nan_to_num(f_scores, 0)  
         
-        # Return indices of top k features
         return np.argsort(f_scores)[-k:]
 
     def mutual_information_selection(self, X, y, k):
@@ -508,38 +505,45 @@ class FattyLiverClassifier:
 
 class CrossValidator:
     """
-    Implements the repeated 5-fold cross-validation procedure
-    described in Section 2-7 of the paper.
+    Implements patient-level cross-validation to prevent data leakage.
     """
-    def __init__(self, n_splits=5, n_repeats=100, random_state=42):
+    def __init__(self, n_splits=5, n_repeats=10, random_state=42):
         self.n_splits = n_splits
         self.n_repeats = n_repeats
         self.random_state = random_state
         
-    def perform_cross_validation(self, X, y, classifier, feature_selector):
+    def perform_cross_validation(self, X, y, patient_ids, classifier, feature_selector):
         """
-        Perform repeated cross-validation exactly as described in the paper.
+        Perform repeated cross-validation with patient-level separation.
         """
         all_metrics = []
         all_confusion_matrices = []
         
+        # Get unique patient IDs
+        unique_patients = np.unique(patient_ids)
+        
         for repeat in range(self.n_repeats):
-            # Shuffle data for this repeat
-            shuffle_idx = np.random.RandomState(self.random_state + repeat).permutation(len(X))
-            X_shuffled = X[shuffle_idx]
-            y_shuffled = y[shuffle_idx]
+            # Shuffle patients for this repeat
+            np.random.seed(self.random_state + repeat)
+            shuffled_patients = np.random.permutation(unique_patients)
             
-            # Perform 5-fold cross-validation
-            kfold = StratifiedKFold(n_splits=self.n_splits, shuffle=True, 
-                                  random_state=self.random_state + repeat)
+            # Split patients into folds
+            patient_folds = np.array_split(shuffled_patients, self.n_splits)
             
             fold_metrics = []
             fold_matrices = []
             
-            for fold, (train_idx, test_idx) in enumerate(kfold.split(X_shuffled, y_shuffled)):
+            for fold in range(self.n_splits):
+                # Get test patients for this fold
+                test_patients = patient_folds[fold]
+                
+                # Get train/test indices based on patient IDs
+                test_idx = np.where(np.isin(patient_ids, test_patients))[0]
+                train_idx = np.where(~np.isin(patient_ids, test_patients))[0]
+                
                 # Split data
-                X_train, X_test = X_shuffled[train_idx], X_shuffled[test_idx]
-                y_train, y_test = y_shuffled[train_idx], y_shuffled[test_idx]
+                X_train, X_test = X[train_idx], X[test_idx]
+                y_train, y_test = y[train_idx], y[test_idx]
                 
                 # Select features
                 selected_indices = feature_selector.select_features(X_train, y_train)
@@ -553,7 +557,7 @@ class CrossValidator:
                 fold_metrics.append(metrics)
                 fold_matrices.append(metrics['confusion_matrix'])
             
-            # Average metrics across folds
+            
             avg_metrics = {
                 key: np.mean([m[key] for m in fold_metrics])
                 for key in fold_metrics[0].keys()
@@ -564,7 +568,7 @@ class CrossValidator:
             all_metrics.append(avg_metrics)
             all_confusion_matrices.append(avg_matrix)
         
-        # Calculate final metrics with standard deviation
+        
         final_metrics = {}
         for key in all_metrics[0].keys():
             values = [m[key] for m in all_metrics]
@@ -577,9 +581,9 @@ class CrossValidator:
         
         return final_metrics, final_confusion_matrix
 
-def main(X, y):
+def main(X, y, patient_ids):
     """
-    Main function to run the complete classification pipeline.
+    Main function to run the complete classification pipeline with patient-level separation.
     """
     # Initialize components
     feature_selector = TwoStageFeatureSelector(['mrmr', 'anova', 'mi'])
@@ -588,7 +592,7 @@ def main(X, y):
         'lightgbm': FattyLiverClassifier('lightgbm'),
         'lda': FattyLiverClassifier('lda')
     }
-    cross_validator = CrossValidator(n_splits=5, n_repeats=100)
+    cross_validator = CrossValidator(n_splits=5, n_repeats=10)
     
     # Results dictionary to store all results
     results = {}
@@ -596,7 +600,7 @@ def main(X, y):
     # Evaluate each classifier
     for clf_name, classifier in classifiers.items():
         metrics, conf_matrix = cross_validator.perform_cross_validation(
-            X, y, classifier, feature_selector
+            X, y, patient_ids, classifier, feature_selector
         )
         results[clf_name] = {
             'metrics': metrics,
@@ -686,9 +690,9 @@ if __name__ == "__main__":
         print("Combining features...")
         X_combined = np.concatenate([glcm_features, deep_features], axis=1)
         
-        # Run classification pipeline
-        print("Running classification pipeline...")
-        results = main(X_combined, y)
+        # Run classification pipeline with patient IDs
+        print("Running classification pipeline with patient-level separation...")
+        results = main(X_combined, y, patient_ids)
         
         # Save results
         print("Saving results...")
