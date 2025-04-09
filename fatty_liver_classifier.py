@@ -1,10 +1,5 @@
 # -*- coding: utf-8 -*-
 """
-Created on Wed Feb 19 23:55:16 2025
-
-@author: Asus
-
-
 Created on Wed June 19 23:55:16 2024
 
 @author: Asus
